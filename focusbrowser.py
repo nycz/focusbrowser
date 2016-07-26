@@ -30,12 +30,25 @@ class CookieJar(QtNetwork.QNetworkCookieJar):
         save_cookies(self.cookiepath, self.allCookies())
 
 
+class WebPage(QtWebKit.QWebPage):
+    def __init__(self, valid_url):
+        super().__init__()
+        self.valid_url = valid_url
+
+    def acceptNavigationRequest(self, frame, request, navtype):
+        if frame != self.mainFrame():
+            return True
+        else:
+            return self.valid_url(request.url())
+
+
 class WebView(QtWebKit.QWebView):
 
     def __init__(self, parent, whitelist):
         super().__init__(parent)
         self.settings().setUserStyleSheetUrl(QUrl('file://' + local_path('styleoverride.css')))
         self.whitelist = whitelist
+        self.setPage(WebPage(self.valid_url))
 
     def valid_url(self, qurl):
         url = qurl.toString()
@@ -46,7 +59,7 @@ class WebView(QtWebKit.QWebView):
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.RightButton:
-            ev.ignore()
+            super().mousePressEvent(ev)
             return
         if ev.button() == Qt.XButton1:
             self.back()
@@ -54,16 +67,17 @@ class WebView(QtWebKit.QWebView):
             self.forward()
         else:
             hittest = self.page().currentFrame().hitTestContent(ev.pos())
-            if hittest.isNull():
-                ev.ignore()
-                return
             url = hittest.linkUrl()
             if self.valid_url(url):
                 if ev.button() == Qt.MiddleButton:
                     subprocess.Popen([sys.executable, sys.argv[0], url.toString()])
                 elif ev.button() == Qt.LeftButton:
                     self.load(url)
+            else:
+                super().mousePressEvent(ev)
+                return
         ev.accept()
+
 
 
 
