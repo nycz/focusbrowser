@@ -22,27 +22,6 @@ class WebPage(QtWebEngineWidgets.QWebEnginePage):
         else:
             return True
 
-    def triggerAction(action, checked=False):
-        print('action:', action)
-
-class FocusWidget(QtWidgets.QWidget):
-
-    def mousePressEvent(self, ev):
-        print('lololo')
-        ev.ignore()
-
-
-class MouseEater(QObject):
-
-    def eventFilter(self, obj, ev):
-        print("LOLOLOLOLOLOLOLOLOLOLOLO")
-        if ev.type() == QEvent.MouseButtonPress:
-            print('YOOOO')
-            return True
-        else:
-            return super().eventFilter(obj, ev)
-
-
 class WebView(QtWebEngineWidgets.QWebEngineView):
 
     def __init__(self, parent, whitelist, configdir):
@@ -78,9 +57,6 @@ class MainWindow(QtWidgets.QWidget):
         else:
             self.view.load(QUrl(self.settings['default url']))
         self.show()
-
-        action = self.view.page().action(QtWebEngineWidgets.QWebEnginePage.OpenLinkInNewWindow)
-        print(action.isEnabled())
 
 
 def read_config(configdir):
