@@ -7,9 +7,9 @@ import subprocess
 import sys
 
 from PyQt4 import QtGui, QtCore, QtWebKit, QtNetwork
-from PyQt4.QtCore import Qt, QUrl
+from PyQt4.QtCore import Qt, QUrl, QDateTime
 
-from libsyntyche.common import read_json, kill_theming, local_path, make_sure_config_exists
+from libsyntyche.common import read_json, write_json, kill_theming, local_path, make_sure_config_exists
 
 
 class CookieJar(QtNetwork.QNetworkCookieJar):
@@ -20,19 +20,14 @@ class CookieJar(QtNetwork.QNetworkCookieJar):
 
     def load_cookies(self):
         try:
-            with open(self.cookiepath, 'rb') as f:
-                cookiedata = pickle.load(f)
+            cookies = load_cookies(self.cookiepath)
         except FileNotFoundError:
             pass
         else:
-            cookies = [c for rawcookies in cookiedata
-                       for c in QtNetwork.QNetworkCookie.parseCookies(rawcookies)]
             self.setAllCookies(cookies)
 
     def save_cookies(self):
-        cookiedata = [c.toRawForm() for c in self.allCookies()]
-        with open(self.cookiepath, 'wb') as f:
-            pickle.dump(cookiedata, f)
+        save_cookies(self.cookiepath, self.allCookies())
 
 
 class WebView(QtWebKit.QWebView):
@@ -80,7 +75,7 @@ class MainWindow(QtGui.QWidget):
 
         self.settings = read_config(self.configdir)
 
-        self.cookiejar = CookieJar(join(self.configdir, 'cookies.pickle'))
+        self.cookiejar = CookieJar(join(self.configdir, 'cookies.json'))
 
         layout = QtGui.QVBoxLayout(self)
         kill_theming(layout)
@@ -102,6 +97,42 @@ def read_config(configdir):
     configpath = join(configdir, 'settings.json')
     make_sure_config_exists(configpath, local_path('defaultconfig.json'))
     return read_json(configpath)
+
+def load_cookies(path):
+    cookiedata = read_json(path)
+    out = []
+    now = QDateTime.currentDateTimeUtc()
+    for c in cookiedata:
+        expirationdate = QDateTime.fromString(c['expiration date'], Qt.ISODate)
+        if expirationdate < now:
+            # Skip expired cookies
+            continue
+        cookie = QtNetwork.QNetworkCookie(name=c['name'], value=c['value'])
+        cookie.setDomain(c['domain'])
+        cookie.setExpirationDate(expirationdate)
+        cookie.setHttpOnly(c['http only'])
+        cookie.setPath(c['path'])
+        cookie.setSecure(c['secure'])
+        out.append(cookie)
+    return out
+
+def save_cookies(path, cookies):
+    out = []
+    for c in cookies:
+        if c.isSessionCookie():
+            continue
+        jsoncookie = {
+            'name': str(c.name(), encoding='ascii'),
+            'value': str(c.value(), encoding='ascii'),
+            'domain': c.domain(),
+            'expiration date': c.expirationDate().toString(Qt.ISODate),
+            'http only': c.isHttpOnly(),
+            'path': c.path(),
+            'secure': c.isSecure()
+        }
+        out.append(jsoncookie)
+    write_json(path, out)
+
 
 
 def main():
