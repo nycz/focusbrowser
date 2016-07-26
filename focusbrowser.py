@@ -39,6 +39,7 @@ class WebView(QtWebKit.QWebView):
 
     def __init__(self, parent, whitelist):
         super().__init__(parent)
+        self.settings().setUserStyleSheetUrl(QUrl('file://' + local_path('styleoverride.css')))
         self.whitelist = whitelist
 
     def valid_url(self, qurl):
