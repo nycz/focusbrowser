@@ -1,54 +1,55 @@
 #!/usr/bin/env python3
 import os
 from os.path import join
-import pickle
 import re
 import subprocess
 import sys
 
-from PyQt4 import QtGui, QtCore, QtWebKit, QtNetwork
-from PyQt4.QtCore import Qt, QUrl, QDateTime
+from PyQt5 import QtWidgets, QtWebEngineWidgets, QtNetwork
+from PyQt5.QtCore import Qt, QUrl, QObject, QEvent
 
-from libsyntyche.common import read_json, write_json, kill_theming, local_path, make_sure_config_exists
-
-
-class CookieJar(QtNetwork.QNetworkCookieJar):
-    def __init__(self, cookiepath):
-        super().__init__()
-        self.cookiepath = cookiepath
-        self.load_cookies()
-
-    def load_cookies(self):
-        try:
-            cookies = load_cookies(self.cookiepath)
-        except FileNotFoundError:
-            pass
-        else:
-            self.setAllCookies(cookies)
-
-    def save_cookies(self):
-        save_cookies(self.cookiepath, self.allCookies())
+from libsyntyche.common import read_json, write_json, local_path, make_sure_config_exists
 
 
-class WebPage(QtWebKit.QWebPage):
-    def __init__(self, valid_url):
-        super().__init__()
+class WebPage(QtWebEngineWidgets.QWebEnginePage):
+    def __init__(self, parent, profile, valid_url):
+        super().__init__(profile, parent)
         self.valid_url = valid_url
 
-    def acceptNavigationRequest(self, frame, request, navtype):
-        if frame != self.mainFrame():
+    def acceptNavigationRequest(self, url, navtype, ismainframe):
+        if ismainframe:
+            return self.valid_url(url)
+        else:
+            return True
+
+    def triggerAction(action, checked=False):
+        print('action:', action)
+
+class FocusWidget(QtWidgets.QWidget):
+
+    def mousePressEvent(self, ev):
+        print('lololo')
+        ev.ignore()
+
+
+class MouseEater(QObject):
+
+    def eventFilter(self, obj, ev):
+        print("LOLOLOLOLOLOLOLOLOLOLOLO")
+        if ev.type() == QEvent.MouseButtonPress:
+            print('YOOOO')
             return True
         else:
-            return self.valid_url(request.url())
+            return super().eventFilter(obj, ev)
 
 
-class WebView(QtWebKit.QWebView):
+class WebView(QtWebEngineWidgets.QWebEngineView):
 
-    def __init__(self, parent, whitelist):
+    def __init__(self, parent, whitelist, configdir):
         super().__init__(parent)
-        self.settings().setUserStyleSheetUrl(QUrl('file://' + local_path('styleoverride.css')))
         self.whitelist = whitelist
-        self.setPage(WebPage(self.valid_url))
+        profile = QtWebEngineWidgets.QWebEngineProfile('Default', self)
+        self.setPage(WebPage(self, profile, self.valid_url))
 
     def valid_url(self, qurl):
         url = qurl.toString()
@@ -57,31 +58,8 @@ class WebView(QtWebKit.QWebView):
                 return True
         return False
 
-    def mousePressEvent(self, ev):
-        if ev.button() == Qt.RightButton:
-            super().mousePressEvent(ev)
-            return
-        if ev.button() == Qt.XButton1:
-            self.back()
-        elif ev.button() == Qt.XButton2:
-            self.forward()
-        else:
-            hittest = self.page().currentFrame().hitTestContent(ev.pos())
-            url = hittest.linkUrl()
-            if self.valid_url(url):
-                if ev.button() == Qt.MiddleButton:
-                    subprocess.Popen([sys.executable, sys.argv[0], url.toString()])
-                elif ev.button() == Qt.LeftButton:
-                    self.load(url)
-            else:
-                super().mousePressEvent(ev)
-                return
-        ev.accept()
 
-
-
-
-class MainWindow(QtGui.QWidget):
+class MainWindow(QtWidgets.QWidget):
     def __init__(self, url):
         super().__init__()
         self.setWindowTitle('focusbrowser')
@@ -89,12 +67,11 @@ class MainWindow(QtGui.QWidget):
 
         self.settings = read_config(self.configdir)
 
-        self.cookiejar = CookieJar(join(self.configdir, 'cookies.json'))
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0,0,0,0)
 
-        layout = QtGui.QVBoxLayout(self)
-        kill_theming(layout)
-        self.view = WebView(self, self.settings['whitelist regexes'])
-        self.view.page().networkAccessManager().setCookieJar(self.cookiejar)
+        self.view = WebView(self, self.settings['whitelist regexes'], self.configdir)
+
         layout.addWidget(self.view)
         if url:
             self.view.load(QUrl(url))
@@ -102,51 +79,14 @@ class MainWindow(QtGui.QWidget):
             self.view.load(QUrl(self.settings['default url']))
         self.show()
 
+        action = self.view.page().action(QtWebEngineWidgets.QWebEnginePage.OpenLinkInNewWindow)
+        print(action.isEnabled())
 
-    def closeEvent(self, ev):
-        self.cookiejar.save_cookies()
-        ev.accept()
 
 def read_config(configdir):
     configpath = join(configdir, 'settings.json')
     make_sure_config_exists(configpath, local_path('defaultconfig.json'))
     return read_json(configpath)
-
-def load_cookies(path):
-    cookiedata = read_json(path)
-    out = []
-    now = QDateTime.currentDateTimeUtc()
-    for c in cookiedata:
-        expirationdate = QDateTime.fromString(c['expiration date'], Qt.ISODate)
-        if expirationdate < now:
-            # Skip expired cookies
-            continue
-        cookie = QtNetwork.QNetworkCookie(name=c['name'], value=c['value'])
-        cookie.setDomain(c['domain'])
-        cookie.setExpirationDate(expirationdate)
-        cookie.setHttpOnly(c['http only'])
-        cookie.setPath(c['path'])
-        cookie.setSecure(c['secure'])
-        out.append(cookie)
-    return out
-
-def save_cookies(path, cookies):
-    out = []
-    for c in cookies:
-        if c.isSessionCookie():
-            continue
-        jsoncookie = {
-            'name': str(c.name(), encoding='ascii'),
-            'value': str(c.value(), encoding='ascii'),
-            'domain': c.domain(),
-            'expiration date': c.expirationDate().toString(Qt.ISODate),
-            'http only': c.isHttpOnly(),
-            'path': c.path(),
-            'secure': c.isSecure()
-        }
-        out.append(jsoncookie)
-    write_json(path, out)
-
 
 
 def main():
@@ -155,7 +95,7 @@ def main():
     parser.add_argument('url', nargs='?')
     args = parser.parse_args()
 
-    app = QtGui.QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
 
     window = MainWindow(args.url)
     app.setActiveWindow(window)
